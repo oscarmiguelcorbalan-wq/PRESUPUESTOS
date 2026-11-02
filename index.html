@@ -98,7 +98,7 @@ label{font-size:13px;color:var(--m)}
       </div>
       <div class="fila" style="margin-top:8px">
         <button class="btn sec" onclick="toggle('pDatos')">Datos</button>
-        <button class="btn sec" onclick="verDocumento()">Ver / PDF</button>
+        <button class="btn sec" onclick="verDocumento()">Ver / Exportar</button>
       </div>
       <div id="pDatos" class="oculto">
         <label>Cliente</label><input id="eCliente">
@@ -169,9 +169,13 @@ label{font-size:13px;color:var(--m)}
 
   <!-- DOCUMENTO -->
   <section id="vDoc" class="oculto">
-    <div class="noprint fila">
-      <label style="display:flex;align-items:center;gap:6px;flex:2"><input type="checkbox" id="dFotos" style="width:auto;margin:0" onchange="verDocumento(true)"> Incluir fotos</label>
-      <button class="btn" style="margin:0 0 10px" onclick="window.print()">Imprimir / PDF</button>
+    <div class="noprint">
+      <label style="display:flex;align-items:center;gap:6px;margin-bottom:6px"><input type="checkbox" id="dFotos" style="width:auto;margin:0" onchange="verDocumento(true)"> Incluir fotos (solo PDF)</label>
+      <div class="fila">
+        <button class="btn" style="margin:0 0 10px" onclick="window.print()">📄 PDF</button>
+        <button class="btn verde" style="margin:0 0 10px" onclick="exportarExcel()">📊 Excel</button>
+        <button class="btn sec" style="margin:0 0 10px" onclick="exportarBC3()">🏗 BC3</button>
+      </div>
     </div>
     <div id="doc"></div>
   </section>
@@ -578,6 +582,205 @@ function verDocumento(refrescar) {
     <p class="muted">${esc(c['Condiciones'] || '')}${c['Validez (días)'] ? '<br>Validez de la oferta: ' + esc(c['Validez (días)']) + ' días.' : ''}</p>
     ${sinPrecio ? `<p class="noprint" style="color:var(--err)">⚠ Hay ${sinPrecio} partida(s) sin precio.</p>` : ''}`;
   if (!refrescar) ver('vDoc');
+}
+
+
+/* ------------------------ exportar Excel y BC3 ---------------------- */
+function nombreArchivo(ext) {
+  const p = S.pres;
+  return (p.id + ' ' + (p.obra || p.cliente || 'presupuesto')).normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^A-Za-z0-9 ._-]+/g, '').replace(/\s+/g, ' ').trim() + '.' + ext;
+}
+// En el móvil abre el menú de compartir (WhatsApp, correo, Archivos…); en el ordenador, descarga
+async function entregarArchivo(bytes, nombre, mime) {
+  const blob = new Blob([bytes], { type: mime });
+  const movil = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+  if (movil && navigator.canShare) {
+    try {
+      const f = new File([blob], nombre, { type: mime });
+      if (navigator.canShare({ files: [f] })) { await navigator.share({ files: [f], title: nombre }); return; }
+    } catch (e) { if (e && e.name === 'AbortError') return; }
+  }
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob); a.download = nombre;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 30000);
+}
+function datosExport() {
+  const c = S.config, pct = numero(c['Impuesto %']);
+  const caps = Object.entries(agrupar(S.partidas)).map(([nombre, ls], ci) => ({
+    nombre, num: ci + 1,
+    partidas: ls.map((l, i) => ({ num: (ci + 1) + '.' + (i + 1), desc: String(l.descripcion || ''), ud: String(l.unidad || ''),
+      cant: numero(l.cantidad), precio: l.precio === '' ? null : numero(l.precio), notas: l.notas || '' }))
+  }));
+  return { c, pct, caps };
+}
+
+/* ---------- ZIP sin compresión (para el .xlsx, no necesita internet) ---------- */
+const CRC_T = (() => { const t = new Uint32Array(256); for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; } return t; })();
+function crc32(b) { let c = 0xFFFFFFFF; for (let i = 0; i < b.length; i++) c = CRC_T[(c ^ b[i]) & 0xFF] ^ (c >>> 8); return (c ^ 0xFFFFFFFF) >>> 0; }
+function zip(archivos) {
+  const enc = new TextEncoder(), partes = [], central = []; let off = 0;
+  for (const [nombre, txt] of archivos) {
+    const n = enc.encode(nombre), d = enc.encode(txt), crc = crc32(d);
+    const h = new DataView(new ArrayBuffer(30));
+    h.setUint32(0, 0x04034b50, true); h.setUint16(4, 20, true); h.setUint16(6, 0x0800, true);
+    h.setUint32(14, crc, true); h.setUint32(18, d.length, true); h.setUint32(22, d.length, true); h.setUint16(26, n.length, true);
+    partes.push(new Uint8Array(h.buffer), n, d);
+    const cd = new DataView(new ArrayBuffer(46));
+    cd.setUint32(0, 0x02014b50, true); cd.setUint16(4, 20, true); cd.setUint16(6, 20, true); cd.setUint16(8, 0x0800, true);
+    cd.setUint32(16, crc, true); cd.setUint32(20, d.length, true); cd.setUint32(24, d.length, true); cd.setUint16(28, n.length, true);
+    cd.setUint32(42, off, true);
+    central.push(new Uint8Array(cd.buffer), n);
+    off += 30 + n.length + d.length;
+  }
+  const tamC = central.reduce((s, x) => s + x.length, 0);
+  const e = new DataView(new ArrayBuffer(22));
+  e.setUint32(0, 0x06054b50, true); e.setUint16(8, archivos.length, true); e.setUint16(10, archivos.length, true);
+  e.setUint32(12, tamC, true); e.setUint32(16, off, true);
+  const todo = partes.concat(central, [new Uint8Array(e.buffer)]);
+  const out = new Uint8Array(todo.reduce((s, x) => s + x.length, 0)); let p = 0;
+  todo.forEach(x => { out.set(x, p); p += x.length; });
+  return out;
+}
+
+/* ------------------------------- Excel ------------------------------- */
+function exportarExcel() {
+  if (!S.pres) return;
+  const { c, pct, caps } = datosExport(), p = S.pres;
+  const x = s => String(s ?? '').replace(/[&<>"]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch])).replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, '');
+  const filas = []; let r = 0;
+  // estilos: 1 negrita · 2 € · 3 € negrita · 4 cabecera tabla · 5 capítulo · 6 € capítulo · 7 número · 8 texto ajustado · 9 título · 10 gris
+  const fila = (celdas, alto) => { r++; filas.push(`<row r="${r}"${alto ? ` ht="${alto}" customHeight="1"` : ''}>` + celdas.map(([col, v, st, f]) => {
+      const ref = col + r, sa = ` s="${st || 0}"`;
+      if (f) return `<c r="${ref}"${sa}><f>${x(f)}</f></c>`;
+      if (typeof v === 'number') return `<c r="${ref}"${sa}><v>${v}</v></c>`;
+      if (v === '' || v == null) return st ? `<c r="${ref}"${sa}/>` : '';
+      return `<c r="${ref}"${sa} t="inlineStr"><is><t xml:space="preserve">${x(v)}</t></is></c>`;
+    }).join('') + '</row>'); return r; };
+  fila([['A', c['Empresa'] || '', 9], ['E', 'PRESUPUESTO', 9]]);
+  const datosEmp = [c['NIF'], c['Dirección'], c['Teléfono'], c['Email']].filter(Boolean).join(' · ');
+  fila([['A', datosEmp, 10], ['E', 'Nº', 1], ['F', p.id, 1]]);
+  fila([['E', 'Fecha', 1], ['F', p.fecha ? new Date(p.fecha).toLocaleDateString('es-ES') : '']]);
+  fila([['A', 'Cliente:', 1], ['B', p.cliente || '']]);
+  fila([['A', 'Obra:', 1], ['B', p.obra || '']]);
+  if (p.direccion) fila([['A', 'Dirección:', 1], ['B', p.direccion]]);
+  r++;
+  fila([['A', 'Nº', 4], ['B', 'Descripción', 4], ['C', 'Ud', 4], ['D', 'Cantidad', 4], ['E', 'Precio', 4], ['F', 'Importe', 4]]);
+  const subt = [];
+  caps.forEach(cap => {
+    const rc = r + 1, primera = rc + 1, ultima = rc + cap.partidas.length;
+    fila([['A', cap.num, 5], ['B', cap.nombre, 5], ['C', '', 5], ['D', '', 5], ['E', '', 5],
+          ['F', null, 6, cap.partidas.length ? `SUM(F${primera}:F${ultima})` : '0']]);
+    subt.push('F' + rc);
+    cap.partidas.forEach(l => {
+      const rr = r + 1;
+      fila([['A', l.num], ['B', l.desc + (l.notas ? '\n(' + l.notas + ')' : ''), 8], ['C', l.ud], ['D', l.cant, 7],
+            ['E', l.precio == null ? '' : l.precio, 2], ['F', null, 2, `D${rr}*E${rr}`]]);
+    });
+  });
+  r++;
+  const rBase = fila([['E', 'Base imponible', 1], ['F', null, 3, subt.length ? subt.join('+') : '0']]);
+  const rPct = fila([['D', pct / 100, 11], ['E', (c['Impuesto'] || 'Impuesto'), 1], ['F', null, 3, `ROUND(F${rBase}*D${r + 1},2)`]]);
+  fila([['E', 'TOTAL', 1], ['F', null, 3, `F${rBase}+F${rPct}`]]);
+  const sinPrecio = S.partidas.filter(l => l.precio === '').length;
+  if (sinPrecio) fila([['B', '⚠ Hay ' + sinPrecio + ' partida(s) sin precio', 10]]);
+  if (p.notas) { r++; fila([['A', 'Notas:', 1], ['B', p.notas, 8]]); }
+  if (c['Condiciones']) fila([['A', 'Condiciones:', 1], ['B', c['Condiciones'], 8]]);
+  if (c['Validez (días)']) fila([['B', 'Validez de la oferta: ' + c['Validez (días)'] + ' días.']]);
+
+  const hoja = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+<sheetPr><pageSetUpPr fitToPage="1"/></sheetPr><sheetViews><sheetView workbookViewId="0"/></sheetViews>
+<cols><col min="1" max="1" width="12" customWidth="1"/><col min="2" max="2" width="55" customWidth="1"/><col min="3" max="3" width="7" customWidth="1"/><col min="4" max="4" width="11" customWidth="1"/><col min="5" max="5" width="14" customWidth="1"/><col min="6" max="6" width="15" customWidth="1"/></cols>
+<sheetData>${filas.join('')}</sheetData>
+<pageMargins left="0.5" right="0.5" top="0.6" bottom="0.6" header="0.3" footer="0.3"/>
+<pageSetup paperSize="9" orientation="portrait" fitToWidth="1" fitToHeight="0"/>
+</worksheet>`;
+  const estilos = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+<numFmts count="2"><numFmt numFmtId="164" formatCode="#,##0.00\\ &quot;€&quot;"/><numFmt numFmtId="165" formatCode="#,##0.###"/></numFmts>
+<fonts count="4"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="14"/><color rgb="FF1F5FA8"/><name val="Calibri"/></font><font><sz val="10"/><color rgb="FF6B7685"/><name val="Calibri"/></font></fonts>
+<fills count="4"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FF1F5FA8"/></patternFill></fill><fill><patternFill patternType="solid"><fgColor rgb="FFEEF3FA"/></patternFill></fill></fills>
+<borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>
+<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>
+<cellXfs count="12">
+<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0" applyAlignment="1"><alignment vertical="top"/></xf>
+<xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1" applyAlignment="1"><alignment vertical="top"/></xf>
+<xf numFmtId="164" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1" applyAlignment="1"><alignment vertical="top"/></xf>
+<xf numFmtId="164" fontId="1" fillId="0" borderId="0" xfId="0" applyNumberFormat="1" applyFont="1"/>
+<xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1"><alignment horizontal="center"/></xf>
+<xf numFmtId="0" fontId="1" fillId="3" borderId="0" xfId="0" applyFont="1" applyFill="1"><alignment horizontal="left"/></xf>
+<xf numFmtId="164" fontId="1" fillId="3" borderId="0" xfId="0" applyNumberFormat="1" applyFont="1" applyFill="1"/>
+<xf numFmtId="165" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1" applyAlignment="1"><alignment vertical="top"/></xf>
+<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0" applyAlignment="1"><alignment wrapText="1" vertical="top"/></xf>
+<xf numFmtId="0" fontId="2" fillId="0" borderId="0" xfId="0" applyFont="1"/>
+<xf numFmtId="0" fontId="3" fillId="0" borderId="0" xfId="0" applyFont="1"/>
+<xf numFmtId="10" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/>
+</cellXfs>
+<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>
+</styleSheet>`;
+  const archivos = [
+    ['[Content_Types].xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/></Types>`],
+    ['_rels/.rels', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>`],
+    ['xl/workbook.xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Presupuesto" sheetId="1" r:id="rId1"/></sheets><calcPr calcId="191029" fullCalcOnLoad="1"/></workbook>`],
+    ['xl/_rels/workbook.xml.rels', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>`],
+    ['xl/styles.xml', estilos],
+    ['xl/worksheets/sheet1.xml', hoja]
+  ];
+  entregarArchivo(zip(archivos), nombreArchivo('xlsx'), 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+}
+
+/* -------------------- BC3 (FIEBDC-3, para Presto, Arquímedes…) -------------------- */
+function exportarBC3() {
+  if (!S.pres) return;
+  const { caps } = datosExport(), p = S.pres;
+  const limpio = s => String(s ?? '').replace(/[|~\\]/g, '/').replace(/\r?\n/g, ' ').replace(/\s+/g, ' ').trim();
+  const texto = s => String(s ?? '').replace(/[|~\\]/g, '/').replace(/\r?\n/g, '\r\n').trim();
+  const corto = s => { s = limpio(s); return s.length > 100 ? s.slice(0, 97) + '...' : s; };
+  const unidad = u => limpio(u).toLowerCase().replace('²', '2').replace('³', '3').replace(/^(uds?|unidad(es)?|u)\.?$/, 'ud') || 'ud';
+  const num = n => String(Math.round(n * 1000) / 1000);
+  const precio = n => (Math.round((n || 0) * 100) / 100).toFixed(2);
+  const d = p.fecha ? new Date(p.fecha) : new Date();
+  const ddmmaa = String(d.getDate()).padStart(2, '0') + String(d.getMonth() + 1).padStart(2, '0') + String(d.getFullYear()).slice(2);
+  const ddmmaaaa = ddmmaa.slice(0, 4) + d.getFullYear();
+  const raiz = limpio(p.id).replace(/[^A-Za-z0-9._-]/g, '') + '##';
+  const L = [];
+  L.push(`~V|${limpio(S.config['Empresa'] || '')}|FIEBDC-3/2020\\${ddmmaaaa}|App Presupuestos||ANSI||2|`);
+  L.push('~K|\\2\\2\\3\\2\\2\\2\\2\\EUR\\|');
+  let total = 0;
+  const capsBC3 = caps.map(cap => {
+    const cod = String(cap.num).padStart(2, '0') + '#';
+    const ps = cap.partidas.map((l, i) => ({ ...l, cod: String(cap.num).padStart(2, '0') + '.' + String(i + 1).padStart(3, '0') }));
+    const sub = ps.reduce((s, l) => s + Math.round(l.cant * (l.precio || 0) * 100) / 100, 0);
+    total += sub; return { ...cap, cod, ps, sub };
+  });
+  L.push(`~C|${raiz}||${corto([p.obra, p.cliente].filter(Boolean).join(' - ') || p.id)}|${precio(total)}|${ddmmaa}|0|`);
+  const tRaiz = [p.cliente && 'Cliente: ' + p.cliente, p.obra && 'Obra: ' + p.obra, p.direccion && 'Dirección: ' + p.direccion, p.notas].filter(Boolean).join('\r\n');
+  if (tRaiz) L.push(`~T|${raiz}|${texto(tRaiz)}|`);
+  if (capsBC3.length) L.push(`~D|${raiz}|${capsBC3.map(c => c.cod + '\\1\\1\\').join('')}|`);
+  capsBC3.forEach((c, ci) => {
+    L.push(`~C|${c.cod}||${corto(c.nombre)}|${precio(c.sub)}|${ddmmaa}|0|`);
+    if (c.ps.length) L.push(`~D|${c.cod}|${c.ps.map(l => l.cod + '\\1\\' + num(l.cant) + '\\').join('')}|`);
+    c.ps.forEach((l, i) => {
+      L.push(`~C|${l.cod}|${unidad(l.ud)}|${corto(l.desc)}|${precio(l.precio)}|${ddmmaa}|0|`);
+      const largo = l.desc + (l.notas ? '\r\n' + l.notas : '');
+      L.push(`~T|${l.cod}|${texto(largo)}|`);
+      L.push(`~M|${c.cod}\\${l.cod}|${ci + 1}\\${i + 1}\\|${num(l.cant)}||`);
+    });
+  });
+  // codificación ANSI (Windows-1252), la que esperan Presto, Arquímedes, etc.
+  const txt = L.join('\r\n') + '\r\n';
+  const out = new Uint8Array(txt.length);
+  for (let i = 0; i < txt.length; i++) {
+    const ch = txt.charCodeAt(i);
+    out[i] = ch < 128 || (ch >= 160 && ch < 256) ? ch : ch === 0x20AC ? 0x80 : 0x3F;
+  }
+  entregarArchivo(out, nombreArchivo('bc3'), 'application/octet-stream');
 }
 
 /* --------------------------- inicio ------------------------ */
