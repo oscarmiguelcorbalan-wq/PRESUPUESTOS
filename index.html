@@ -119,7 +119,13 @@ label{font-size:13px;color:var(--m)}
   <section id="vNueva" class="oculto">
     <div class="card">
       <b>1 · Foto</b> <span class="muted">(opcional)</span>
-      <input id="fFoto" type="file" accept="image/*" capture="environment" onchange="cargarFoto(this)">
+      <div class="fila">
+        <button class="btn sec" onclick="$('fCamara').click()">📷 Hacer foto</button>
+        <button class="btn sec" onclick="$('fGaleria').click()">🖼 Galería</button>
+      </div>
+      <input id="fCamara" type="file" accept="image/*" capture="environment" class="oculto" onchange="cargarFoto(this)">
+      <input id="fGaleria" type="file" accept="image/*" class="oculto" onchange="cargarFoto(this)">
+      <button id="fQuitar" class="btn sec oculto" style="padding:8px" onclick="quitarFoto()">Quitar foto</button>
       <img id="fPrev" class="foto oculto" alt="">
     </div>
     <div class="card" style="text-align:center">
@@ -406,9 +412,15 @@ async function guardarDatos() {
 /* ----------------------- nueva partida --------------------- */
 function nuevaPartida() {
   S.foto = null; S.audio = null;
-  $('fFoto').value = ''; $('fPrev').classList.add('oculto'); $('aPrev').classList.add('oculto');
+  quitarFoto(); $('aPrev').classList.add('oculto');
+  $('bGrab').innerHTML = '🎙<br>Grabar';
   $('fTexto').value = ''; $('tiempo').textContent = '';
   ver('vNueva');
+}
+
+function quitarFoto() {
+  S.foto = null; $('fCamara').value = ''; $('fGaleria').value = '';
+  $('fPrev').classList.add('oculto'); $('fQuitar').classList.add('oculto');
 }
 
 async function cargarFoto(input) {
@@ -422,7 +434,7 @@ async function cargarFoto(input) {
     c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
     const dataUrl = c.toDataURL('image/jpeg', 0.82);
     S.foto = { data: dataUrl.split(',')[1], mime: 'image/jpeg' };
-    $('fPrev').src = dataUrl; $('fPrev').classList.remove('oculto');
+    $('fPrev').src = dataUrl; $('fPrev').classList.remove('oculto'); $('fQuitar').classList.remove('oculto');
     URL.revokeObjectURL(url);
   } catch (e) { aviso('No se pudo leer la foto'); }
   finally { cargando(); }
