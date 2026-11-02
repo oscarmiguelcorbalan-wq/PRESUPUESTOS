@@ -1,0 +1,586 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#1f5fa8">
+<title>Presupuestos</title>
+<style>
+:root{--b:#1f5fa8;--bg:#f4f6f9;--t:#1c2430;--m:#6b7685;--ok:#1d8a4e;--warn:#b86e00;--err:#c0392b}
+*{box-sizing:border-box}
+body{margin:0;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background:var(--bg);color:var(--t)}
+header{background:var(--b);color:#fff;padding:12px 14px;display:flex;align-items:center;gap:8px;position:sticky;top:0;z-index:5}
+header h1{font-size:18px;margin:0;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+header button{background:transparent;color:#fff;border:0;font-size:22px;padding:2px 8px}
+main{padding:12px;max-width:760px;margin:auto;padding-bottom:90px}
+.card{background:#fff;border-radius:12px;padding:12px;margin-bottom:10px;box-shadow:0 1px 3px #0001}
+.btn{display:block;width:100%;padding:14px;border:0;border-radius:10px;background:var(--b);color:#fff;font-size:16px;font-weight:600;margin:8px 0;cursor:pointer}
+.btn.sec{background:#e3e8ef;color:var(--t)}
+.btn.rojo{background:var(--err)}
+.btn.verde{background:var(--ok)}
+.flotante{position:fixed;left:12px;right:12px;bottom:12px;max-width:736px;margin:auto;box-shadow:0 4px 12px #0003}
+input,select,textarea{width:100%;padding:10px;font-size:16px;border:1px solid #ccd3dc;border-radius:8px;margin:4px 0 10px;font-family:inherit;background:#fff}
+textarea{min-height:90px}
+label{font-size:13px;color:var(--m)}
+.fila{display:flex;gap:8px}.fila>*{flex:1}
+.muted{color:var(--m);font-size:13px}
+.item{display:flex;gap:10px;align-items:flex-start;cursor:pointer}
+.item img{width:64px;height:64px;object-fit:cover;border-radius:8px;flex:none;background:#dde2e8}
+.item .d{flex:1;font-size:14px;min-width:0}
+.item .d b{display:block}
+.importe{font-weight:700;white-space:nowrap}
+.cap{font-weight:700;margin:16px 4px 6px;color:var(--b);display:flex;justify-content:space-between}
+.tag{display:inline-block;font-size:11px;padding:2px 6px;border-radius:6px;background:#fff1d6;color:var(--warn);margin-top:4px}
+.tag.ok{background:#dcf3e6;color:var(--ok)}
+.grab{width:130px;height:130px;border-radius:50%;border:0;background:var(--err);color:#fff;font-size:16px;font-weight:700;margin:10px auto;display:block}
+.grab.on{animation:p 1s infinite}@keyframes p{50%{opacity:.55}}
+.foto{width:100%;border-radius:10px;margin-top:8px}
+.oculto{display:none!important}
+#cargando{position:fixed;inset:0;background:#000a;color:#fff;display:flex;align-items:center;justify-content:center;font-size:18px;z-index:20;text-align:center;padding:24px}
+#aviso{position:fixed;left:12px;right:12px;top:64px;max-width:736px;margin:auto;background:#1c2430;color:#fff;padding:12px;border-radius:10px;z-index:21;font-size:14px}
+.tot{display:flex;justify-content:space-between;padding:3px 0}
+.tot.g{font-size:18px;font-weight:700;border-top:1px solid #ddd;margin-top:6px;padding-top:8px}
+/* Documento */
+#doc{background:#fff;padding:22px;font-size:13px;border-radius:12px}
+#doc h2{margin:0 0 4px}
+#doc table{width:100%;border-collapse:collapse;margin-top:12px}
+#doc th,#doc td{border-bottom:1px solid #e1e4e8;padding:6px 4px;text-align:left;vertical-align:top}
+#doc th{font-size:12px;color:#555}
+#doc .n{text-align:right;white-space:nowrap}
+#doc tr.capf td{background:#eef3fa;font-weight:700}
+#doc img{max-width:170px;border-radius:4px;margin-top:4px;display:block}
+.cab{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap}
+@media print{header,.noprint,.flotante{display:none!important}main{padding:0;max-width:none}body{background:#fff}#doc{padding:0;border-radius:0}tr{page-break-inside:avoid}}
+</style>
+</head>
+<body>
+<header>
+  <button id="bAtras" class="oculto" onclick="atras()">‹</button>
+  <h1 id="titulo">Presupuestos</h1>
+  <button id="bPend" class="oculto" style="font-size:14px;background:#fff3;border-radius:8px" onclick="sincronizar(true)"></button>
+  <button id="bAjustes" onclick="ver('vConfig')">⚙︎</button>
+</header>
+
+<main>
+  <!-- AJUSTES -->
+  <section id="vConfig" class="oculto">
+    <div class="card">
+      <label>URL de la aplicación web de Apps Script</label>
+      <input id="cUrl" placeholder="https://script.google.com/macros/s/.../exec">
+      <label>PIN</label>
+      <input id="cPin" type="password" inputmode="numeric">
+      <button class="btn" onclick="guardarConfig()">Guardar y conectar</button>
+    </div>
+  </section>
+
+  <!-- LISTA DE PRESUPUESTOS -->
+  <section id="vLista" class="oculto">
+    <div id="lista"></div>
+    <button class="btn flotante" onclick="ver('vCrear')">+ Nuevo presupuesto</button>
+  </section>
+
+  <!-- CREAR PRESUPUESTO -->
+  <section id="vCrear" class="oculto">
+    <div class="card">
+      <label>Cliente</label><input id="nCliente">
+      <label>Obra</label><input id="nObra" placeholder="Ej.: Reforma baño">
+      <label>Dirección</label><input id="nDir">
+      <button class="btn" onclick="crearPresupuesto()">Crear</button>
+    </div>
+  </section>
+
+  <!-- PRESUPUESTO -->
+  <section id="vPres" class="oculto">
+    <div class="card">
+      <div class="cab">
+        <div><b id="pCliente"></b><div class="muted" id="pObra"></div></div>
+        <div style="text-align:right"><div class="importe" id="pTotal"></div><div class="muted" id="pEstado"></div></div>
+      </div>
+      <div class="fila" style="margin-top:8px">
+        <button class="btn sec" onclick="toggle('pDatos')">Datos</button>
+        <button class="btn sec" onclick="verDocumento()">Ver / PDF</button>
+      </div>
+      <div id="pDatos" class="oculto">
+        <label>Cliente</label><input id="eCliente">
+        <label>Obra</label><input id="eObra">
+        <label>Dirección</label><input id="eDir">
+        <label>Estado</label>
+        <select id="eEstado"><option>Borrador</option><option>Enviado</option><option>Aceptado</option><option>Rechazado</option></select>
+        <label>Notas (salen en el presupuesto)</label><textarea id="eNotas"></textarea>
+        <button class="btn" onclick="guardarDatos()">Guardar datos</button>
+      </div>
+    </div>
+    <div id="pendientes"></div>
+    <div id="partidas"></div>
+    <button class="btn flotante" onclick="nuevaPartida()">📷 🎙 Nueva partida</button>
+  </section>
+
+  <!-- NUEVA PARTIDA -->
+  <section id="vNueva" class="oculto">
+    <div class="card">
+      <b>1 · Foto</b> <span class="muted">(opcional)</span>
+      <input id="fFoto" type="file" accept="image/*" capture="environment" onchange="cargarFoto(this)">
+      <img id="fPrev" class="foto oculto" alt="">
+    </div>
+    <div class="card" style="text-align:center">
+      <b>2 · Explica qué hay que hacer</b>
+      <div class="muted">Di el trabajo, las medidas o cantidades y el precio si lo sabes.</div>
+      <button id="bGrab" class="grab" onclick="grabar()">🎙<br>Grabar</button>
+      <div id="tiempo" class="muted"></div>
+      <audio id="aPrev" controls class="oculto" style="width:100%;margin-top:8px"></audio>
+    </div>
+    <div class="card">
+      <label>…o escríbelo / añade detalles</label>
+      <textarea id="fTexto" placeholder="Ej.: alicatar pared de la ducha, 2,40 por 2,10, azulejo lo pone el cliente"></textarea>
+    </div>
+    <button class="btn verde" onclick="enviarPartida()">Interpretar y añadir</button>
+  </section>
+
+  <!-- EDITAR PARTIDA -->
+  <section id="vEditar" class="oculto">
+    <div class="card">
+      <img id="ePrev" class="foto oculto" alt="">
+      <label>Capítulo</label><input id="lCap" list="capitulos">
+      <datalist id="capitulos"></datalist>
+      <label>Descripción</label><textarea id="lDesc"></textarea>
+      <div class="fila">
+        <div><label>Unidad</label><input id="lUd"></div>
+        <div><label>Cantidad</label><input id="lCant" inputmode="decimal"></div>
+        <div><label>Precio €</label><input id="lPrecio" inputmode="decimal"></div>
+      </div>
+      <div class="fila">
+        <div><label>Orden</label><input id="lOrden" inputmode="numeric"></div>
+        <div><label>Importe</label><input id="lImp" disabled></div>
+      </div>
+      <label>Notas / dudas</label><textarea id="lNotas" style="min-height:60px"></textarea>
+      <label>Lo que dijiste</label>
+      <div class="muted" id="lTrans" style="white-space:pre-wrap;margin-bottom:8px"></div>
+      <a id="lAudio" class="muted oculto" target="_blank">▶ Escuchar audio en Drive</a>
+      <button class="btn verde" onclick="guardarPartida()">Guardar</button>
+      <button class="btn rojo" onclick="borrarPartida()">Borrar partida</button>
+    </div>
+  </section>
+
+  <!-- DOCUMENTO -->
+  <section id="vDoc" class="oculto">
+    <div class="noprint fila">
+      <label style="display:flex;align-items:center;gap:6px;flex:2"><input type="checkbox" id="dFotos" style="width:auto;margin:0" onchange="verDocumento(true)"> Incluir fotos</label>
+      <button class="btn" style="margin:0 0 10px" onclick="window.print()">Imprimir / PDF</button>
+    </div>
+    <div id="doc"></div>
+  </section>
+</main>
+
+<div id="cargando" class="oculto"></div>
+<div id="aviso" class="oculto" onclick="this.classList.add('oculto')"></div>
+
+<script>
+/* ------------------------- estado ------------------------- */
+const S = { url: '', pin: '', pres: null, partidas: [], config: {}, editando: null, foto: null, audio: null, pila: [] };
+const eur = n => new Intl.NumberFormat('es-ES', { style: 'currency', currency: 'EUR' }).format(n || 0);
+const numero = v => { const n = parseFloat(String(v ?? '').replace(/\s/g, '').replace(',', '.')); return isNaN(n) ? 0 : n; };
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const $ = id => document.getElementById(id);
+const mini = (id, w) => id ? 'https://drive.google.com/thumbnail?id=' + id + '&sz=w' + (w || 300) : '';
+
+function guardarLocal(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
+function leerLocal(k) { try { return localStorage.getItem(k) || ''; } catch (e) { return ''; } }
+
+function cargando(t) { const c = $('cargando'); if (t) { c.textContent = t; c.classList.remove('oculto'); } else c.classList.add('oculto'); }
+function aviso(t) { const a = $('aviso'); a.textContent = t; a.classList.remove('oculto'); clearTimeout(aviso._t); aviso._t = setTimeout(() => a.classList.add('oculto'), 5000); }
+function toggle(id) { $(id).classList.toggle('oculto'); }
+
+function errorRed() { const e = new Error('Sin conexión'); e.red = true; return e; }
+async function api(accion, datos) {
+  let r, j;
+  try {
+    r = await fetch(S.url, {
+      method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify(Object.assign({ accion, pin: S.pin }, datos || {}))
+    });
+    j = await r.json();
+  } catch (e) { throw errorRed(); }
+  if (!j.ok) throw new Error(j.error);
+  return j.data;
+}
+
+/* ------------- cola sin cobertura (se guarda en el móvil) ------------- */
+const cola = (() => {
+  let dbp;
+  const db = () => dbp || (dbp = new Promise((ok, ko) => {
+    const r = indexedDB.open('presupuestos', 1);
+    r.onupgradeneeded = () => r.result.createObjectStore('cola', { keyPath: 'cid' });
+    r.onsuccess = () => ok(r.result); r.onerror = () => ko(r.error);
+  }));
+  const tx = async (modo, fn) => {
+    const d = await db();
+    return new Promise((ok, ko) => {
+      const t = d.transaction('cola', modo); const q = fn(t.objectStore('cola'));
+      t.oncomplete = () => ok(q && q.result); t.onerror = () => ko(t.error);
+    });
+  };
+  return { put: e => tx('readwrite', s => s.put(e)), del: id => tx('readwrite', s => s.delete(id)), todos: () => tx('readonly', s => s.getAll()) };
+})();
+const uid = () => (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2);
+const enviando = new Set();
+let sincronizando = false;
+
+async function enviarUno(envio) {
+  if (enviando.has(envio.cid)) return { ok: false, ocupado: true };
+  enviando.add(envio.cid);
+  try {
+    const nuevas = await api('nuevaPartida', { presupuestoId: envio.presupuestoId, foto: envio.foto, audio: envio.audio, texto: envio.texto, cid: envio.cid });
+    await cola.del(envio.cid);
+    if (S.pres && S.pres.id === envio.presupuestoId) {
+      const ya = new Set(S.partidas.map(l => l.id));
+      S.partidas = S.partidas.concat(nuevas.filter(l => !ya.has(l.id)));
+    } else {
+      try { localStorage.removeItem('cache_p_' + envio.presupuestoId); } catch (e) {}
+    }
+    return { ok: true, nuevas };
+  } catch (e) {
+    if (!e.red) { envio.error = e.message; envio.intentos = (envio.intentos || 0) + 1; await cola.put(envio).catch(() => {}); }
+    return { ok: false, red: !!e.red, error: e.message };
+  } finally { enviando.delete(envio.cid); }
+}
+
+async function sincronizar(manual) {
+  if (sincronizando || !S.url) return;
+  sincronizando = true;
+  let enviadas = 0, sinRed = false;
+  try {
+    const items = (await cola.todos()).sort((a, b) => a.fecha - b.fecha);
+    for (const it of items) {
+      if (!manual && (it.intentos || 0) >= 5) continue; // los que fallan mucho, solo a mano
+      const r = await enviarUno(it);
+      if (r.ok) enviadas += r.nuevas.length;
+      else if (r.red) { sinRed = true; break; }
+    }
+  } catch (e) {} finally { sincronizando = false; }
+  if (enviadas) aviso('Enviadas las partidas pendientes: ' + enviadas + ' nuevas para revisar.');
+  else if (manual && sinRed) aviso('Sigue sin conexión. Se enviarán solas al volver la cobertura.');
+  if (actual === 'vPres') pintarPresupuesto();
+  actualizarPendientes();
+}
+
+async function actualizarPendientes() {
+  let items = [];
+  try { items = await cola.todos(); } catch (e) {}
+  const b = $('bPend');
+  b.classList.toggle('oculto', !items.length);
+  b.textContent = '⏳ ' + items.length;
+  if (!S.pres || actual !== 'vPres') return;
+  const mios = items.filter(i => i.presupuestoId === S.pres.id);
+  $('pendientes').innerHTML = mios.length ? '<div class="cap"><span>Pendientes de enviar</span><span></span></div>' + mios.map(i => `
+    <div class="card item" style="border:2px dashed #c9d3e0">
+      ${i.foto ? `<img src="data:image/jpeg;base64,${i.foto.data}" alt="">` : ''}
+      <div class="d">${esc(i.texto || (i.audio ? 'Audio grabado' : ''))}
+        <div class="muted">${new Date(i.fecha).toLocaleString('es-ES')}</div>
+        ${i.error ? `<div class="muted" style="color:var(--err)">Error: ${esc(i.error)}</div>` : '<span class="tag">Sin enviar</span>'}
+        <div class="fila" style="margin-top:6px">
+          <button class="btn sec" style="margin:0;padding:8px" onclick="event.stopPropagation();sincronizar(true)">Reintentar</button>
+          <button class="btn sec" style="margin:0;padding:8px" onclick="event.stopPropagation();descartar('${i.cid}')">Descartar</button>
+        </div>
+      </div>
+    </div>`).join('') : '';
+}
+async function descartar(cid) {
+  if (!confirm('¿Descartar esta partida pendiente? Se perderán la foto y el audio.')) return;
+  await cola.del(cid); actualizarPendientes();
+}
+
+/* --------- copia local de los presupuestos para abrirlos sin cobertura --------- */
+function guardarCache(k, v) { guardarLocal(k, JSON.stringify(v)); }
+function leerCache(k) { try { return JSON.parse(leerLocal(k) || 'null'); } catch (e) { return null; } }
+
+/* ------------------------ navegación ----------------------- */
+const TITULOS = { vConfig: 'Ajustes', vLista: 'Presupuestos', vCrear: 'Nuevo presupuesto', vNueva: 'Nueva partida', vEditar: 'Partida', vDoc: 'Presupuesto' };
+let actual = null;
+function ver(v, sinPila) {
+  if (actual && !sinPila && actual !== v) S.pila.push(actual);
+  document.querySelectorAll('main>section').forEach(s => s.classList.toggle('oculto', s.id !== v));
+  actual = v;
+  $('titulo').textContent = v === 'vPres' && S.pres ? S.pres.id + ' · ' + (S.pres.obra || S.pres.cliente) : TITULOS[v];
+  $('bAtras').classList.toggle('oculto', !S.pila.length);
+  if (v === 'vConfig') { $('cUrl').value = S.url; $('cPin').value = S.pin; }
+  if (v === 'vPres') actualizarPendientes();
+  window.scrollTo(0, 0);
+}
+function atras() { const v = S.pila.pop(); if (v === 'vLista') listar(); else if (v === 'vPres') pintarPresupuesto(); ver(v || 'vLista', true); }
+
+/* -------------------------- ajustes ------------------------ */
+async function guardarConfig() {
+  S.url = $('cUrl').value.trim(); S.pin = $('cPin').value.trim();
+  guardarLocal('pres_url', S.url); guardarLocal('pres_pin', S.pin);
+  try { cargando('Conectando…'); await api('ping'); S.pila = []; await listar(); ver('vLista', true); }
+  catch (e) { aviso('No conecta: ' + e.message); }
+  finally { cargando(); }
+}
+
+/* --------------------------- lista ------------------------- */
+async function listar() {
+  cargando('Cargando…');
+  try {
+    let ps;
+    try { ps = await api('listar'); guardarCache('cache_lista', ps); }
+    catch (e) {
+      if (!e.red || !leerCache('cache_lista')) throw e;
+      ps = leerCache('cache_lista'); aviso('Sin conexión: se muestra la última copia guardada.');
+    }
+    $('lista').innerHTML = ps.length ? ps.map(p => `
+      <div class="card item" onclick="abrir('${esc(p.id)}')">
+        <div class="d"><b>${esc(p.id)} · ${esc(p.cliente || '(sin cliente)')}</b>
+          <span class="muted">${esc(p.obra)} · ${p.nPartidas} partidas · ${esc(p.estado)}</span></div>
+        <div class="importe">${eur(p.total)}</div>
+      </div>`).join('') : '<div class="card muted">Aún no hay presupuestos. Crea el primero.</div>';
+  } catch (e) { aviso(e.message); }
+  finally { cargando(); }
+}
+
+async function crearPresupuesto() {
+  cargando('Creando…');
+  try {
+    const p = await api('crear', { cliente: $('nCliente').value, obra: $('nObra').value, direccion: $('nDir').value });
+    ['nCliente', 'nObra', 'nDir'].forEach(i => $(i).value = '');
+    S.pila = ['vLista']; await abrir(p.id, true);
+  } catch (e) { aviso(e.message); }
+  finally { cargando(); }
+}
+
+/* ------------------------ presupuesto ---------------------- */
+async function abrir(id, sinPila) {
+  cargando('Abriendo…');
+  try {
+    let r;
+    try { r = await api('obtener', { id }); }
+    catch (e) {
+      r = leerCache('cache_p_' + id);
+      if (!e.red || !r) throw e.red ? new Error('Sin conexión y este presupuesto no está guardado en el móvil. Ábrelo una vez con cobertura.') : e;
+      aviso('Sin conexión: puedes añadir partidas, se enviarán solas al volver la cobertura.');
+    }
+    S.pres = r.presupuesto; S.partidas = r.partidas; S.config = r.config;
+    pintarPresupuesto(); ver('vPres', sinPila);
+  } catch (e) { aviso(e.message); }
+  finally { cargando(); }
+}
+
+function pintarPresupuesto() {
+  const p = S.pres; if (!p) return;
+  guardarCache('cache_p_' + p.id, { presupuesto: p, partidas: S.partidas, config: S.config });
+  actualizarPendientes();
+  $('pCliente').textContent = p.cliente || '(sin cliente)';
+  $('pObra').textContent = [p.obra, p.direccion].filter(Boolean).join(' · ');
+  $('pEstado').textContent = p.estado;
+  $('pTotal').textContent = eur(S.partidas.reduce((s, l) => s + numero(l.importe), 0)) + ' + ' + (S.config['Impuesto'] || 'imp.');
+  $('eCliente').value = p.cliente; $('eObra').value = p.obra; $('eDir').value = p.direccion; $('eEstado').value = p.estado || 'Borrador'; $('eNotas').value = p.notas || '';
+
+  const caps = agrupar(S.partidas);
+  $('capitulos').innerHTML = Object.keys(caps).map(c => `<option value="${esc(c)}">`).join('');
+  $('partidas').innerHTML = S.partidas.length ? Object.entries(caps).map(([c, ls]) => `
+    <div class="cap"><span>${esc(c)}</span><span>${eur(ls.reduce((s, l) => s + numero(l.importe), 0))}</span></div>
+    ${ls.map(l => `
+      <div class="card item" onclick="editar('${l.id}')">
+        ${l.fotoId ? `<img src="${mini(l.fotoId, 200)}" loading="lazy" alt="">` : ''}
+        <div class="d">${esc(l.descripcion)}
+          <div class="muted">${fmt(l.cantidad)} ${esc(l.unidad)} × ${l.precio === '' ? '<span style="color:var(--err)">sin precio</span>' : eur(l.precio)}</div>
+          ${l.estado === 'Revisar' ? '<span class="tag">Revisar</span>' : ''}
+          ${l.notas ? `<div class="muted" style="font-style:italic">${esc(l.notas)}</div>` : ''}
+        </div>
+        <div class="importe">${eur(l.importe)}</div>
+      </div>`).join('')}`).join('')
+    : '<div class="card muted">Sin partidas todavía. Pulsa «Nueva partida», haz una foto y explica lo que hay que hacer.</div>';
+}
+
+function agrupar(ls) { const o = {}; ls.forEach(l => (o[l.capitulo || 'General'] = o[l.capitulo || 'General'] || []).push(l)); return o; }
+function fmt(n) { return new Intl.NumberFormat('es-ES', { maximumFractionDigits: 3 }).format(numero(n)); }
+
+async function guardarDatos() {
+  cargando('Guardando…');
+  try {
+    S.pres = await api('actualizarPresupuesto', { id: S.pres.id, cliente: $('eCliente').value, obra: $('eObra').value, direccion: $('eDir').value, estado: $('eEstado').value, notas: $('eNotas').value });
+    $('pDatos').classList.add('oculto'); pintarPresupuesto(); ver('vPres', true); aviso('Datos guardados');
+  } catch (e) { aviso(e.message); }
+  finally { cargando(); }
+}
+
+/* ----------------------- nueva partida --------------------- */
+function nuevaPartida() {
+  S.foto = null; S.audio = null;
+  $('fFoto').value = ''; $('fPrev').classList.add('oculto'); $('aPrev').classList.add('oculto');
+  $('fTexto').value = ''; $('tiempo').textContent = '';
+  ver('vNueva');
+}
+
+async function cargarFoto(input) {
+  const f = input.files[0]; if (!f) return;
+  cargando('Preparando foto…');
+  try {
+    const url = URL.createObjectURL(f);
+    const img = await new Promise((ok, ko) => { const i = new Image(); i.onload = () => ok(i); i.onerror = ko; i.src = url; });
+    const max = 1600, k = Math.min(1, max / Math.max(img.width, img.height));
+    const c = document.createElement('canvas'); c.width = Math.round(img.width * k); c.height = Math.round(img.height * k);
+    c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+    const dataUrl = c.toDataURL('image/jpeg', 0.82);
+    S.foto = { data: dataUrl.split(',')[1], mime: 'image/jpeg' };
+    $('fPrev').src = dataUrl; $('fPrev').classList.remove('oculto');
+    URL.revokeObjectURL(url);
+  } catch (e) { aviso('No se pudo leer la foto'); }
+  finally { cargando(); }
+}
+
+let grabador = null, trozos = [], flujo = null, crono = null;
+async function grabar() {
+  const b = $('bGrab');
+  if (grabador && grabador.state === 'recording') { grabador.stop(); return; }
+  try { flujo = await navigator.mediaDevices.getUserMedia({ audio: true }); }
+  catch (e) { aviso('Sin permiso de micrófono. Puedes escribirlo abajo.'); return; }
+  trozos = []; grabador = new MediaRecorder(flujo);
+  grabador.ondataavailable = e => e.data.size && trozos.push(e.data);
+  grabador.onstop = async () => {
+    flujo.getTracks().forEach(t => t.stop()); clearInterval(crono);
+    b.classList.remove('on'); b.innerHTML = '🎙<br>Volver a grabar';
+    const blob = new Blob(trozos, { type: grabador.mimeType || 'audio/webm' });
+    $('aPrev').src = URL.createObjectURL(blob); $('aPrev').classList.remove('oculto');
+    try { S.audio = { data: await aWav(blob), mime: 'audio/wav' }; }
+    catch (e) { S.audio = null; aviso('No se pudo convertir el audio: ' + e.message); }
+  };
+  grabador.start();
+  const t0 = Date.now();
+  b.classList.add('on'); b.innerHTML = '⏹<br>Parar';
+  crono = setInterval(() => { const s = Math.floor((Date.now() - t0) / 1000); $('tiempo').textContent = Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); if (s >= 300) grabador.stop(); }, 500);
+}
+
+// Convierte cualquier grabación del navegador a WAV mono 16 kHz (formato que entiende Gemini)
+async function aWav(blob) {
+  const AC = window.AudioContext || window.webkitAudioContext;
+  const ac = new AC();
+  const dec = await decodificar(ac, blob);
+  if (ac.close) ac.close();
+  const sr = 16000, len = Math.max(1, Math.ceil(dec.duration * sr));
+  const off = new (window.OfflineAudioContext || window.webkitOfflineAudioContext)(1, len, sr);
+  const src = off.createBufferSource(); src.buffer = dec; src.connect(off.destination); src.start(0);
+  const d = (await off.startRendering()).getChannelData(0);
+  const ab = new ArrayBuffer(44 + d.length * 2), v = new DataView(ab);
+  const w = (o, s) => { for (let i = 0; i < s.length; i++) v.setUint8(o + i, s.charCodeAt(i)); };
+  w(0, 'RIFF'); v.setUint32(4, 36 + d.length * 2, true); w(8, 'WAVE'); w(12, 'fmt ');
+  v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true); v.setUint32(24, sr, true);
+  v.setUint32(28, sr * 2, true); v.setUint16(32, 2, true); v.setUint16(34, 16, true); w(36, 'data'); v.setUint32(40, d.length * 2, true);
+  for (let i = 0; i < d.length; i++) { const x = Math.max(-1, Math.min(1, d[i])); v.setInt16(44 + i * 2, x < 0 ? x * 0x8000 : x * 0x7fff, true); }
+  return await aBase64(new Blob([ab], { type: 'audio/wav' }));
+}
+async function decodificar(ac, blob) {
+  const buf = await blob.arrayBuffer();
+  return await new Promise((ok, ko) => { const p = ac.decodeAudioData(buf, ok, ko); if (p && p.then) p.then(ok, ko); });
+}
+function aBase64(blob) { return new Promise((ok, ko) => { const r = new FileReader(); r.onload = () => ok(String(r.result).split(',')[1]); r.onerror = ko; r.readAsDataURL(blob); }); }
+
+async function enviarPartida() {
+  if (grabador && grabador.state === 'recording') { aviso('Para primero la grabación'); return; }
+  const texto = $('fTexto').value.trim();
+  if (!S.audio && !texto) { aviso('Graba un audio o escribe qué hay que hacer'); return; }
+  // 1º se guarda en el móvil; 2º se intenta enviar. Si no hay cobertura, queda en cola.
+  const envio = { cid: uid(), presupuestoId: S.pres.id, foto: S.foto, audio: S.audio, texto, fecha: Date.now(), error: '', intentos: 0 };
+  let enCola = true;
+  try { await cola.put(envio); } catch (e) { enCola = false; }
+  cargando(navigator.onLine === false ? 'Guardando…' : 'Interpretando… (unos segundos)');
+  const r = navigator.onLine === false ? { ok: false, red: true } : await enviarUno(envio);
+  cargando();
+  if (!r.ok && !enCola) { aviso('No se pudo enviar ni guardar en el móvil: ' + (r.error || 'sin conexión') + '. No salgas de esta pantalla y vuelve a intentarlo.'); return; }
+  S.pila.pop(); ver('vPres', true); pintarPresupuesto();
+  if (r.ok) aviso(r.nuevas.length === 1 ? 'Partida añadida. Revísala.' : r.nuevas.length + ' partidas añadidas. Revísalas.');
+  else if (r.red) aviso('Sin cobertura: la partida queda guardada en el móvil y se enviará sola.');
+  else aviso('Error: ' + r.error + '. Queda guardada en el móvil; puedes reintentar.');
+}
+
+/* ----------------------- editar partida -------------------- */
+function editar(id) {
+  const l = S.partidas.find(x => x.id === id); if (!l) return;
+  S.editando = l;
+  $('lCap').value = l.capitulo; $('lDesc').value = l.descripcion; $('lUd').value = l.unidad;
+  $('lCant').value = fmt(l.cantidad).replace(/\./g, ''); $('lPrecio').value = l.precio === '' ? '' : String(l.precio).replace('.', ',');
+  $('lOrden').value = l.orden; $('lNotas').value = l.notas || ''; $('lTrans').textContent = l.transcripcion || '—';
+  $('ePrev').classList.toggle('oculto', !l.fotoId); if (l.fotoId) $('ePrev').src = mini(l.fotoId, 1000);
+  $('lAudio').classList.toggle('oculto', !l.audioId); $('lAudio').href = 'https://drive.google.com/file/d/' + l.audioId + '/view';
+  calcImporte(); ver('vEditar');
+}
+['lCant', 'lPrecio'].forEach(i => document.addEventListener('input', e => { if (e.target.id === i) calcImporte(); }));
+function calcImporte() { $('lImp').value = $('lPrecio').value.trim() === '' ? 'sin precio' : eur(numero($('lCant').value) * numero($('lPrecio').value)); }
+
+async function guardarPartida() {
+  const l = S.editando;
+  const datos = { id: l.id, capitulo: $('lCap').value.trim() || 'General', descripcion: $('lDesc').value, unidad: $('lUd').value,
+    cantidad: numero($('lCant').value), precio: $('lPrecio').value.trim() === '' ? '' : numero($('lPrecio').value),
+    orden: numero($('lOrden').value), notas: $('lNotas').value, estado: 'OK' };
+  cargando('Guardando…');
+  try {
+    const n = await api('guardarPartida', { partida: datos });
+    S.partidas = S.partidas.map(x => x.id === n.id ? n : x).sort((a, b) => numero(a.orden) - numero(b.orden));
+    S.pila.pop(); pintarPresupuesto(); ver('vPres', true);
+  } catch (e) { aviso(e.message); }
+  finally { cargando(); }
+}
+
+async function borrarPartida() {
+  if (!confirm('¿Borrar esta partida?')) return;
+  cargando('Borrando…');
+  try {
+    await api('borrarPartida', { id: S.editando.id });
+    S.partidas = S.partidas.filter(x => x.id !== S.editando.id);
+    S.pila.pop(); pintarPresupuesto(); ver('vPres', true);
+  } catch (e) { aviso(e.message); }
+  finally { cargando(); }
+}
+
+/* ------------------------- documento ----------------------- */
+function verDocumento(refrescar) {
+  const p = S.pres, c = S.config, conFotos = $('dFotos').checked;
+  const base = S.partidas.reduce((s, l) => s + numero(l.importe), 0);
+  const pct = numero(c['Impuesto %']), imp = Math.round(base * pct) / 100;
+  const sinPrecio = S.partidas.filter(l => l.precio === '').length;
+  const fecha = p.fecha ? new Date(p.fecha).toLocaleDateString('es-ES') : '';
+  let n = 0;
+  const filas = Object.entries(agrupar(S.partidas)).map(([cap, ls], ci) => `
+    <tr class="capf"><td colspan="4">${ci + 1}. ${esc(cap)}</td><td class="n">${eur(ls.reduce((s, l) => s + numero(l.importe), 0))}</td></tr>
+    ${ls.map((l, i) => `<tr>
+      <td>${ci + 1}.${i + 1}</td>
+      <td>${esc(l.descripcion)}${conFotos && l.fotoId ? `<img src="${mini(l.fotoId, 500)}" alt="">` : ''}</td>
+      <td class="n">${fmt(l.cantidad)} ${esc(l.unidad)}</td>
+      <td class="n">${l.precio === '' ? '—' : eur(l.precio)}</td>
+      <td class="n">${eur(l.importe)}</td></tr>`).join('')}`).join('');
+
+  $('doc').innerHTML = `
+    <div class="cab">
+      <div><h2>${esc(c['Empresa'] || '')}</h2>
+        <div class="muted">${[c['NIF'], c['Dirección'], c['Teléfono'], c['Email']].filter(Boolean).map(esc).join('<br>')}</div></div>
+      <div style="text-align:right"><h2>PRESUPUESTO</h2><div>Nº ${esc(p.id)}</div><div>${fecha}</div></div>
+    </div>
+    <div style="margin-top:14px"><b>Cliente:</b> ${esc(p.cliente)}<br><b>Obra:</b> ${esc(p.obra)}${p.direccion ? '<br><b>Dirección:</b> ' + esc(p.direccion) : ''}</div>
+    <table><thead><tr><th>Nº</th><th>Descripción</th><th class="n">Cantidad</th><th class="n">Precio</th><th class="n">Importe</th></tr></thead>
+    <tbody>${filas || '<tr><td colspan="5">Sin partidas</td></tr>'}</tbody></table>
+    <div style="max-width:300px;margin:14px 0 0 auto">
+      <div class="tot"><span>Base imponible</span><b>${eur(base)}</b></div>
+      <div class="tot"><span>${esc(c['Impuesto'] || 'Impuesto')} ${fmt(pct)}%</span><b>${eur(imp)}</b></div>
+      <div class="tot g"><span>TOTAL</span><span>${eur(base + imp)}</span></div>
+    </div>
+    ${p.notas ? `<p style="white-space:pre-wrap">${esc(p.notas)}</p>` : ''}
+    <p class="muted">${esc(c['Condiciones'] || '')}${c['Validez (días)'] ? '<br>Validez de la oferta: ' + esc(c['Validez (días)']) + ' días.' : ''}</p>
+    ${sinPrecio ? `<p class="noprint" style="color:var(--err)">⚠ Hay ${sinPrecio} partida(s) sin precio.</p>` : ''}`;
+  if (!refrescar) ver('vDoc');
+}
+
+/* --------------------------- inicio ------------------------ */
+S.url = leerLocal('pres_url'); S.pin = leerLocal('pres_pin');
+if (S.url && S.pin) { ver('vLista', true); listar(); } else ver('vConfig', true);
+
+// Reenvío automático: al volver la cobertura, al volver a la app y cada minuto
+window.addEventListener('online', () => sincronizar());
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') sincronizar(); });
+setInterval(() => { if (navigator.onLine !== false) sincronizar(); }, 60000);
+setTimeout(() => sincronizar(), 1500);
+actualizarPendientes();
+// Pide al navegador que no borre lo guardado y deja la app disponible sin cobertura
+if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
+if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
+</script>
+</body>
+</html>
