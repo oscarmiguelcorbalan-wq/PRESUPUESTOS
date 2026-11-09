@@ -137,7 +137,7 @@ label{font-size:13px;color:var(--m)}
       <div class="fotodic" style="margin-top:10px">
         <img id="fPrev" class="oculto" alt="">
         <div class="c">
-          <button id="bDictar" class="dictar" onclick="dictar()">🎙 Dictar</button>
+          <button id="bDictar" class="dictar" onclick="dictar()">🎙 Iniciar grabación</button>
           <div id="dEstado" class="muted"></div>
           <button id="fQuitar" class="btn sec oculto" style="padding:8px" onclick="quitarFoto()">Quitar foto</button>
         </div>
@@ -467,11 +467,25 @@ async function cargarFoto(input) {
 }
 
 /* --------- dictado: voz → texto editable (no se envía audio) --------- */
-let reco = null, recoBase = '', recoOn = false;
-function pararDictado() { recoOn = false; if (reco) { try { reco.stop(); } catch (e) {} } }
+let reco = null, recoBase = '', recoOn = false, recoSesion = 0;
+// Parar de verdad: se corta la sesión (para que onend no la reanude), se sueltan los eventos
+// y se apaga el micrófono con stop() + abort() (iOS a veces ignora stop()). El botón cambia al instante.
+function pararDictado() {
+  const r = reco, estabaOn = recoOn;
+  recoOn = false; recoSesion++; reco = null;
+  if (r) {
+    r.onresult = null; r.onerror = null; r.onend = null;
+    try { r.stop(); } catch (e) {}
+    setTimeout(() => { try { r.abort(); } catch (e) {} }, 300);
+  }
+  if (estabaOn) {
+    const t = $('fTexto'); t.value = t.value.trim();
+    estadoDictado(false, t.value ? 'Revisa el texto y pulsa «Añadir y hacer otra».' : '');
+  }
+}
 function estadoDictado(on, msg) {
   const b = $('bDictar'); b.classList.toggle('on', on);
-  b.innerHTML = on ? '⏹ Parar dictado' : '🎙 Dictar';
+  b.innerHTML = on ? '⏹ Grabando… pulsa para parar' : '🎙 Iniciar grabación';
   $('dEstado').textContent = msg || '';
 }
 function usarTeclado(msg) {
@@ -485,11 +499,14 @@ function dictar() {
   // Sin cobertura o sin reconocimiento de voz en el navegador: dictado del teclado (funciona sin conexión)
   if (!SR) return usarTeclado('Este navegador no dicta directamente: pulsa el micrófono 🎙 del teclado.');
   if (navigator.onLine === false) return usarTeclado('Sin cobertura: pulsa el micrófono 🎙 del teclado, que dicta sin conexión.');
+  const sesion = ++recoSesion; let reinicios = 0;
   reco = new SR(); reco.lang = 'es-ES'; reco.continuous = true; reco.interimResults = true;
+  const yo = reco, vigente = () => recoOn && sesion === recoSesion && reco === yo;
   const t = $('fTexto');
   recoBase = t.value.trim() ? t.value.replace(/\s*$/, ' ') : '';
   let finales = '';
   reco.onresult = e => {
+    if (!vigente()) return;
     let prov = '';
     for (let i = e.resultIndex; i < e.results.length; i++) {
       const r = e.results[i];
@@ -499,15 +516,21 @@ function dictar() {
   };
   reco.onerror = e => {
     const m = e.error === 'not-allowed' || e.error === 'service-not-allowed' ? 'Sin permiso de micrófono para dictar.' : e.error === 'network' ? 'Sin conexión para el dictado.' : e.error === 'no-speech' ? '' : 'El dictado se cortó (' + e.error + ').';
-    recoOn = false; estadoDictado(false);
+    if (!vigente()) return;
+    if (e.error === 'no-speech' || e.error === 'aborted') return; // silencio: lo gestiona onend
+    pararDictado();
     if (m) usarTeclado(m + ' Usa el micrófono 🎙 del teclado.');
   };
   reco.onend = () => {
-    if (recoOn) { recoBase = t.value.replace(/\s*$/, ' '); finales = ''; try { reco.start(); return; } catch (e) {} } // iOS corta a veces: se reanuda
-    recoOn = false; t.value = t.value.trim(); estadoDictado(false, t.value ? 'Revisa el texto y pulsa «Añadir y hacer otra».' : '');
+    // Solo se reanuda si el usuario NO ha pulsado Parar (iOS corta solo a veces); máximo 20 veces seguidas
+    if (vigente() && reinicios < 20) {
+      reinicios++; recoBase = t.value.trim() ? t.value.replace(/\s*$/, ' ') : ''; finales = '';
+      try { yo.start(); return; } catch (e) {}
+    }
+    if (sesion === recoSesion) pararDictado();
   };
-  try { reco.start(); recoOn = true; estadoDictado(true, 'Escuchando… habla con normalidad.'); }
-  catch (e) { recoOn = false; usarTeclado(); }
+  try { reco.start(); recoOn = true; estadoDictado(true, 'Grabando… habla con normalidad. Pulsa «Parar» al terminar.'); }
+  catch (e) { recoOn = false; reco = null; estadoDictado(false); usarTeclado(); }
 }
 
 async function enviarPartida(otra) {
