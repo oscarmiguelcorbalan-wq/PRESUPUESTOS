@@ -145,7 +145,9 @@ label{font-size:13px;color:var(--m)}
       <textarea id="fTexto" style="min-height:120px;margin-top:8px" placeholder="Ej.: alicatar pared de la ducha, 2,40 por 2,10, azulejo lo pone el cliente"></textarea>
       <div class="muted">Sin cobertura: toca la casilla y usa el micrófono 🎙 del teclado del iPhone. La partida se guarda en el móvil y se interpreta al volver la cobertura.</div>
     </div>
-    <button class="btn verde" onclick="enviarPartida()">Interpretar y añadir</button>
+    <div id="nCola" class="muted" style="text-align:center;margin:4px 0"></div>
+    <button class="btn verde" onclick="enviarPartida(true)">✓ Añadir y hacer otra</button>
+    <button class="btn sec" onclick="enviarPartida(false)">Añadir y terminar</button>
   </section>
 
   <!-- EDITAR PARTIDA -->
@@ -246,7 +248,7 @@ const cola = (() => {
 })();
 const uid = () => (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2);
 const enviando = new Set();
-let sincronizando = false;
+let sincronizando = false, otraVuelta = false;
 
 async function enviarUno(envio) {
   if (enviando.has(envio.cid)) return { ok: false, ocupado: true };
@@ -271,19 +273,22 @@ async function enviarUno(envio) {
 }
 
 async function sincronizar(manual) {
-  if (sincronizando || !S.url) return;
-  sincronizando = true;
+  if (!S.url) return;
+  if (sincronizando) { otraVuelta = true; return; }
+  sincronizando = true; otraVuelta = false;
   let enviadas = 0, sinRed = false;
   try {
     const items = (await cola.todos()).sort((a, b) => a.fecha - b.fecha);
     for (const it of items) {
       if (!manual && (it.intentos || 0) >= 5) continue; // los que fallan mucho, solo a mano
-      const r = await enviarUno(it);
-      if (r.ok) enviadas += r.nuevas.length;
+      const pr = enviarUno(it); actualizarPendientes();
+      const r = await pr;
+      if (r.ok) { enviadas += r.nuevas.length; if (actual === 'vPres') pintarPresupuesto(); actualizarPendientes(); }
       else if (r.red) { sinRed = true; break; }
     }
   } catch (e) {} finally { sincronizando = false; }
-  if (enviadas) aviso('Enviadas las partidas pendientes: ' + enviadas + ' nuevas para revisar.');
+  if (otraVuelta && !sinRed) { otraVuelta = false; setTimeout(() => sincronizar(manual), 50); }
+  if (enviadas) aviso('Interpretadas: ' + enviadas + ' partida' + (enviadas > 1 ? 's' : '') + ' nueva' + (enviadas > 1 ? 's' : '') + ' para revisar.');
   else if (manual && sinRed) aviso('Sigue sin conexión. Se enviarán solas al volver la cobertura.');
   if (actual === 'vPres') pintarPresupuesto();
   actualizarPendientes();
@@ -295,6 +300,7 @@ async function actualizarPendientes() {
   const b = $('bPend');
   b.classList.toggle('oculto', !items.length);
   b.textContent = '⏳ ' + items.length;
+  if (S.pres) { const n = items.filter(i => i.presupuestoId === S.pres.id).length; $('nCola').textContent = n ? '⏳ ' + n + ' partida' + (n > 1 ? 's' : '') + ' interpretándose en segundo plano' : ''; }
   if (!S.pres || actual !== 'vPres') return;
   const mios = items.filter(i => i.presupuestoId === S.pres.id);
   $('pendientes').innerHTML = mios.length ? '<div class="cap"><span>Pendientes de enviar</span><span></span></div>' + mios.map(i => `
@@ -302,7 +308,7 @@ async function actualizarPendientes() {
       ${i.foto ? `<img src="data:image/jpeg;base64,${i.foto.data}" alt="">` : ''}
       <div class="d">${esc(i.texto || (i.audio ? 'Audio grabado (sin texto)' : ''))}
         <div class="muted">${new Date(i.fecha).toLocaleString('es-ES')}</div>
-        ${i.error ? `<div class="muted" style="color:var(--err)">Error: ${esc(i.error)}</div>` : '<span class="tag">Sin enviar</span>'}
+        ${i.error ? `<div class="muted" style="color:var(--err)">Error: ${esc(i.error)}</div>` : enviando.has(i.cid) ? '<span class="tag ok">Interpretando…</span>' : '<span class="tag">En cola</span>'}
         <div class="fila" style="margin-top:6px">
           <button class="btn sec" style="margin:0;padding:8px" onclick="event.stopPropagation();sincronizar(true)">Reintentar</button>
           <button class="btn sec" style="margin:0;padding:8px" onclick="event.stopPropagation();descartar('${i.cid}')">Descartar</button>
@@ -435,7 +441,7 @@ function nuevaPartida() {
   S.foto = null;
   quitarFoto();
   $('fTexto').value = ''; $('dEstado').textContent = '';
-  ver('vNueva');
+  ver('vNueva'); actualizarPendientes();
 }
 
 function quitarFoto() {
@@ -498,28 +504,33 @@ function dictar() {
   };
   reco.onend = () => {
     if (recoOn) { recoBase = t.value.replace(/\s*$/, ' '); finales = ''; try { reco.start(); return; } catch (e) {} } // iOS corta a veces: se reanuda
-    recoOn = false; t.value = t.value.trim(); estadoDictado(false, t.value ? 'Revisa el texto y pulsa «Interpretar y añadir».' : '');
+    recoOn = false; t.value = t.value.trim(); estadoDictado(false, t.value ? 'Revisa el texto y pulsa «Añadir y hacer otra».' : '');
   };
   try { reco.start(); recoOn = true; estadoDictado(true, 'Escuchando… habla con normalidad.'); }
   catch (e) { recoOn = false; usarTeclado(); }
 }
 
-async function enviarPartida() {
+async function enviarPartida(otra) {
   pararDictado();
   const texto = $('fTexto').value.trim();
-  if (!texto) { aviso('Dicta o escribe qué hay que hacer'); return; }
-  // 1º se guarda en el móvil; 2º se intenta enviar. Si no hay cobertura, queda en cola.
+  if (!texto) { if (!otra) { S.pila.pop(); ver('vPres', true); pintarPresupuesto(); } else aviso('Dicta o escribe qué hay que hacer'); return; }
+  // Se guarda en el móvil y se interpreta en segundo plano: no hay que esperar para hacer la siguiente
   const envio = { cid: uid(), presupuestoId: S.pres.id, foto: S.foto, texto, fecha: Date.now(), error: '', intentos: 0 };
-  let enCola = true;
-  try { await cola.put(envio); } catch (e) { enCola = false; }
-  cargando(navigator.onLine === false ? 'Guardando…' : 'Interpretando… (unos segundos)');
-  const r = navigator.onLine === false ? { ok: false, red: true } : await enviarUno(envio);
-  cargando();
-  if (!r.ok && !enCola) { aviso('No se pudo enviar ni guardar en el móvil: ' + (r.error || 'sin conexión') + '. No salgas de esta pantalla y vuelve a intentarlo.'); return; }
-  S.pila.pop(); ver('vPres', true); pintarPresupuesto();
-  if (r.ok) aviso(r.nuevas.length === 1 ? 'Partida añadida. Revísala.' : r.nuevas.length + ' partidas añadidas. Revísalas.');
-  else if (r.red) aviso('Sin cobertura: la partida queda guardada en el móvil y se enviará sola.');
-  else aviso('Error: ' + r.error + '. Queda guardada en el móvil; puedes reintentar.');
+  try { await cola.put(envio); }
+  catch (e) {
+    // Sin almacenamiento en el móvil: envío directo esperando la respuesta
+    cargando('Interpretando… (unos segundos)'); const r = await enviarUno(envio); cargando();
+    if (!r.ok) { aviso('No se pudo enviar ni guardar en el móvil: ' + (r.error || 'sin conexión') + '. Vuelve a intentarlo.'); return; }
+  }
+  sincronizar();
+  if (otra) {
+    S.foto = null; quitarFoto(); $('fTexto').value = ''; $('dEstado').textContent = '';
+    window.scrollTo(0, 0); actualizarPendientes();
+    aviso(navigator.onLine === false ? 'Guardada en el móvil. Sigue con la siguiente; se interpretará al volver la cobertura.' : 'Enviada a interpretar. Sigue con la siguiente partida.');
+  } else {
+    S.pila.pop(); ver('vPres', true); pintarPresupuesto();
+    aviso(navigator.onLine === false ? 'Sin cobertura: las partidas quedan guardadas en el móvil y se enviarán solas.' : 'Interpretando en segundo plano. Irán apareciendo en la lista.');
+  }
 }
 
 /* ----------------------- editar partida -------------------- */
