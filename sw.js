@@ -1,5 +1,5 @@
 // Permite abrir la app aunque no haya cobertura (guarda una copia de la pantalla)
-const CACHE = 'presupuestos-v2';
+const CACHE = 'presupuestos-v3';
 
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(['./', './index.html'])));

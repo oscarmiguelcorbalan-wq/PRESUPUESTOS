@@ -34,6 +34,11 @@ label{font-size:13px;color:var(--m)}
 .tag.ok{background:#dcf3e6;color:var(--ok)}
 .grab{width:130px;height:130px;border-radius:50%;border:0;background:var(--err);color:#fff;font-size:16px;font-weight:700;margin:10px auto;display:block}
 .grab.on{animation:p 1s infinite}@keyframes p{50%{opacity:.55}}
+.dictar{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;padding:14px;border:0;border-radius:10px;background:var(--err);color:#fff;font-size:17px;font-weight:700;margin:6px 0}
+.dictar.on{animation:p 1s infinite}
+.fotodic{display:flex;gap:10px;align-items:flex-start}
+.fotodic img{width:96px;height:96px;object-fit:cover;border-radius:8px;flex:none}
+.fotodic .c{flex:1;min-width:0}
 .foto{width:100%;border-radius:10px;margin-top:8px}
 .oculto{display:none!important}
 #cargando{position:fixed;inset:0;background:#000a;color:#fff;display:flex;align-items:center;justify-content:center;font-size:18px;z-index:20;text-align:center;padding:24px}
@@ -125,19 +130,20 @@ label{font-size:13px;color:var(--m)}
       </div>
       <input id="fCamara" type="file" accept="image/*" capture="environment" class="oculto" onchange="cargarFoto(this)">
       <input id="fGaleria" type="file" accept="image/*" class="oculto" onchange="cargarFoto(this)">
-      <button id="fQuitar" class="btn sec oculto" style="padding:8px" onclick="quitarFoto()">Quitar foto</button>
-      <img id="fPrev" class="foto oculto" alt="">
-    </div>
-    <div class="card" style="text-align:center">
-      <b>2 · Explica qué hay que hacer</b>
-      <div class="muted">Di el trabajo, las medidas o cantidades y el precio si lo sabes.</div>
-      <button id="bGrab" class="grab" onclick="grabar()">🎙<br>Grabar</button>
-      <div id="tiempo" class="muted"></div>
-      <audio id="aPrev" controls class="oculto" style="width:100%;margin-top:8px"></audio>
     </div>
     <div class="card">
-      <label>…o escríbelo / añade detalles</label>
-      <textarea id="fTexto" placeholder="Ej.: alicatar pared de la ducha, 2,40 por 2,10, azulejo lo pone el cliente"></textarea>
+      <b>2 · Explica qué hay que hacer</b>
+      <div class="muted">Di el trabajo, las medidas o cantidades y el precio si lo sabes. Revisa y corrige el texto antes de interpretar.</div>
+      <div class="fotodic" style="margin-top:10px">
+        <img id="fPrev" class="oculto" alt="">
+        <div class="c">
+          <button id="bDictar" class="dictar" onclick="dictar()">🎙 Dictar</button>
+          <div id="dEstado" class="muted"></div>
+          <button id="fQuitar" class="btn sec oculto" style="padding:8px" onclick="quitarFoto()">Quitar foto</button>
+        </div>
+      </div>
+      <textarea id="fTexto" style="min-height:120px;margin-top:8px" placeholder="Ej.: alicatar pared de la ducha, 2,40 por 2,10, azulejo lo pone el cliente"></textarea>
+      <div class="muted">Sin cobertura: toca la casilla y usa el micrófono 🎙 del teclado del iPhone. La partida se guarda en el móvil y se interpreta al volver la cobertura.</div>
     </div>
     <button class="btn verde" onclick="enviarPartida()">Interpretar y añadir</button>
   </section>
@@ -159,8 +165,10 @@ label{font-size:13px;color:var(--m)}
         <div><label>Importe</label><input id="lImp" disabled></div>
       </div>
       <label>Notas / dudas</label><textarea id="lNotas" style="min-height:60px"></textarea>
-      <label>Lo que dijiste</label>
-      <div class="muted" id="lTrans" style="white-space:pre-wrap;margin-bottom:8px"></div>
+      <label>Lo que dijiste (puedes corregirlo y volver a interpretar)</label>
+      <textarea id="lTrans" style="min-height:70px"></textarea>
+      <button id="bReint" class="btn sec" onclick="reinterpretar()">🔄 Volver a interpretar</button>
+      <div id="lReintInfo" class="muted" style="margin-bottom:8px"></div>
       <a id="lAudio" class="muted oculto" target="_blank">▶ Escuchar audio en Drive</a>
       <button class="btn verde" onclick="guardarPartida()">Guardar</button>
       <button class="btn rojo" onclick="borrarPartida()">Borrar partida</button>
@@ -186,7 +194,7 @@ label{font-size:13px;color:var(--m)}
 
 <script>
 /* ------------------------- estado ------------------------- */
-const S = { url: '', pin: '', pres: null, partidas: [], config: {}, editando: null, foto: null, audio: null, pila: [] };
+const S = { url: '', pin: '', pres: null, partidas: [], config: {}, editando: null, foto: null, pila: [] };
 const eur = n => new Intl.NumberFormat('es-ES', { style: 'currency', currency: 'EUR' }).format(n || 0);
 const numero = v => { const n = parseFloat(String(v ?? '').replace(/\s/g, '').replace(',', '.')); return isNaN(n) ? 0 : n; };
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -218,18 +226,23 @@ async function api(accion, datos) {
 const cola = (() => {
   let dbp;
   const db = () => dbp || (dbp = new Promise((ok, ko) => {
-    const r = indexedDB.open('presupuestos', 1);
-    r.onupgradeneeded = () => r.result.createObjectStore('cola', { keyPath: 'cid' });
+    const r = indexedDB.open('presupuestos', 2);
+    r.onupgradeneeded = () => {
+      const d = r.result;
+      if (!d.objectStoreNames.contains('cola')) d.createObjectStore('cola', { keyPath: 'cid' });
+      if (!d.objectStoreNames.contains('fotos')) d.createObjectStore('fotos', { keyPath: 'id' }); // foto + texto de cada partida
+    };
     r.onsuccess = () => ok(r.result); r.onerror = () => ko(r.error);
   }));
-  const tx = async (modo, fn) => {
-    const d = await db();
+  const tx = async (modo, fn, almacen) => {
+    const d = await db(); almacen = almacen || 'cola';
     return new Promise((ok, ko) => {
-      const t = d.transaction('cola', modo); const q = fn(t.objectStore('cola'));
+      const t = d.transaction(almacen, modo); const q = fn(t.objectStore(almacen));
       t.oncomplete = () => ok(q && q.result); t.onerror = () => ko(t.error);
     });
   };
-  return { put: e => tx('readwrite', s => s.put(e)), del: id => tx('readwrite', s => s.delete(id)), todos: () => tx('readonly', s => s.getAll()) };
+  return { put: e => tx('readwrite', s => s.put(e)), del: id => tx('readwrite', s => s.delete(id)), todos: () => tx('readonly', s => s.getAll()),
+    fotoPut: e => tx('readwrite', s => s.put(e), 'fotos'), fotoGet: id => tx('readonly', s => s.get(id), 'fotos'), fotoDel: id => tx('readwrite', s => s.delete(id), 'fotos') };
 })();
 const uid = () => (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2);
 const enviando = new Set();
@@ -239,8 +252,11 @@ async function enviarUno(envio) {
   if (enviando.has(envio.cid)) return { ok: false, ocupado: true };
   enviando.add(envio.cid);
   try {
-    const nuevas = await api('nuevaPartida', { presupuestoId: envio.presupuestoId, foto: envio.foto, audio: envio.audio, texto: envio.texto, cid: envio.cid });
+    if (!String(envio.texto || '').trim()) { const e = new Error('No hay texto: esta partida se grabó con audio. Descártala y díctala de nuevo.'); throw e; }
+    // Ya no se envía audio: Gemini recibe el texto dictado/escrito junto con la foto
+    const nuevas = await api('nuevaPartida', { presupuestoId: envio.presupuestoId, foto: envio.foto, texto: envio.texto, cid: envio.cid });
     await cola.del(envio.cid);
+    for (const l of nuevas) { if (!l.transcripcion) l.transcripcion = envio.texto; await cola.fotoPut({ id: l.id, foto: envio.foto || null, texto: envio.texto }).catch(() => {}); }
     if (S.pres && S.pres.id === envio.presupuestoId) {
       const ya = new Set(S.partidas.map(l => l.id));
       S.partidas = S.partidas.concat(nuevas.filter(l => !ya.has(l.id)));
@@ -284,7 +300,7 @@ async function actualizarPendientes() {
   $('pendientes').innerHTML = mios.length ? '<div class="cap"><span>Pendientes de enviar</span><span></span></div>' + mios.map(i => `
     <div class="card item" style="border:2px dashed #c9d3e0">
       ${i.foto ? `<img src="data:image/jpeg;base64,${i.foto.data}" alt="">` : ''}
-      <div class="d">${esc(i.texto || (i.audio ? 'Audio grabado' : ''))}
+      <div class="d">${esc(i.texto || (i.audio ? 'Audio grabado (sin texto)' : ''))}
         <div class="muted">${new Date(i.fecha).toLocaleString('es-ES')}</div>
         ${i.error ? `<div class="muted" style="color:var(--err)">Error: ${esc(i.error)}</div>` : '<span class="tag">Sin enviar</span>'}
         <div class="fila" style="margin-top:6px">
@@ -295,7 +311,7 @@ async function actualizarPendientes() {
     </div>`).join('') : '';
 }
 async function descartar(cid) {
-  if (!confirm('¿Descartar esta partida pendiente? Se perderán la foto y el audio.')) return;
+  if (!confirm('¿Descartar esta partida pendiente? Se perderán la foto y el texto.')) return;
   await cola.del(cid); actualizarPendientes();
 }
 
@@ -415,10 +431,10 @@ async function guardarDatos() {
 
 /* ----------------------- nueva partida --------------------- */
 function nuevaPartida() {
-  S.foto = null; S.audio = null;
-  quitarFoto(); $('aPrev').classList.add('oculto');
-  $('bGrab').innerHTML = '🎙<br>Grabar';
-  $('fTexto').value = ''; $('tiempo').textContent = '';
+  pararDictado();
+  S.foto = null;
+  quitarFoto();
+  $('fTexto').value = ''; $('dEstado').textContent = '';
   ver('vNueva');
 }
 
@@ -444,58 +460,56 @@ async function cargarFoto(input) {
   finally { cargando(); }
 }
 
-let grabador = null, trozos = [], flujo = null, crono = null;
-async function grabar() {
-  const b = $('bGrab');
-  if (grabador && grabador.state === 'recording') { grabador.stop(); return; }
-  try { flujo = await navigator.mediaDevices.getUserMedia({ audio: true }); }
-  catch (e) { aviso('Sin permiso de micrófono. Puedes escribirlo abajo.'); return; }
-  trozos = []; grabador = new MediaRecorder(flujo);
-  grabador.ondataavailable = e => e.data.size && trozos.push(e.data);
-  grabador.onstop = async () => {
-    flujo.getTracks().forEach(t => t.stop()); clearInterval(crono);
-    b.classList.remove('on'); b.innerHTML = '🎙<br>Volver a grabar';
-    const blob = new Blob(trozos, { type: grabador.mimeType || 'audio/webm' });
-    $('aPrev').src = URL.createObjectURL(blob); $('aPrev').classList.remove('oculto');
-    try { S.audio = { data: await aWav(blob), mime: 'audio/wav' }; }
-    catch (e) { S.audio = null; aviso('No se pudo convertir el audio: ' + e.message); }
+/* --------- dictado: voz → texto editable (no se envía audio) --------- */
+let reco = null, recoBase = '', recoOn = false;
+function pararDictado() { recoOn = false; if (reco) { try { reco.stop(); } catch (e) {} } }
+function estadoDictado(on, msg) {
+  const b = $('bDictar'); b.classList.toggle('on', on);
+  b.innerHTML = on ? '⏹ Parar dictado' : '🎙 Dictar';
+  $('dEstado').textContent = msg || '';
+}
+function usarTeclado(msg) {
+  const t = $('fTexto'); t.focus();
+  try { t.setSelectionRange(t.value.length, t.value.length); } catch (e) {}
+  aviso(msg || 'Pulsa el micrófono 🎙 del teclado para dictar.');
+}
+function dictar() {
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (recoOn) { pararDictado(); return; }
+  // Sin cobertura o sin reconocimiento de voz en el navegador: dictado del teclado (funciona sin conexión)
+  if (!SR) return usarTeclado('Este navegador no dicta directamente: pulsa el micrófono 🎙 del teclado.');
+  if (navigator.onLine === false) return usarTeclado('Sin cobertura: pulsa el micrófono 🎙 del teclado, que dicta sin conexión.');
+  reco = new SR(); reco.lang = 'es-ES'; reco.continuous = true; reco.interimResults = true;
+  const t = $('fTexto');
+  recoBase = t.value.trim() ? t.value.replace(/\s*$/, ' ') : '';
+  let finales = '';
+  reco.onresult = e => {
+    let prov = '';
+    for (let i = e.resultIndex; i < e.results.length; i++) {
+      const r = e.results[i];
+      if (r.isFinal) finales += r[0].transcript.trim() + ' '; else prov += r[0].transcript;
+    }
+    t.value = recoBase + finales + prov;
   };
-  grabador.start();
-  const t0 = Date.now();
-  b.classList.add('on'); b.innerHTML = '⏹<br>Parar';
-  crono = setInterval(() => { const s = Math.floor((Date.now() - t0) / 1000); $('tiempo').textContent = Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); if (s >= 300) grabador.stop(); }, 500);
+  reco.onerror = e => {
+    const m = e.error === 'not-allowed' || e.error === 'service-not-allowed' ? 'Sin permiso de micrófono para dictar.' : e.error === 'network' ? 'Sin conexión para el dictado.' : e.error === 'no-speech' ? '' : 'El dictado se cortó (' + e.error + ').';
+    recoOn = false; estadoDictado(false);
+    if (m) usarTeclado(m + ' Usa el micrófono 🎙 del teclado.');
+  };
+  reco.onend = () => {
+    if (recoOn) { recoBase = t.value.replace(/\s*$/, ' '); finales = ''; try { reco.start(); return; } catch (e) {} } // iOS corta a veces: se reanuda
+    recoOn = false; t.value = t.value.trim(); estadoDictado(false, t.value ? 'Revisa el texto y pulsa «Interpretar y añadir».' : '');
+  };
+  try { reco.start(); recoOn = true; estadoDictado(true, 'Escuchando… habla con normalidad.'); }
+  catch (e) { recoOn = false; usarTeclado(); }
 }
-
-// Convierte cualquier grabación del navegador a WAV mono 16 kHz (formato que entiende Gemini)
-async function aWav(blob) {
-  const AC = window.AudioContext || window.webkitAudioContext;
-  const ac = new AC();
-  const dec = await decodificar(ac, blob);
-  if (ac.close) ac.close();
-  const sr = 16000, len = Math.max(1, Math.ceil(dec.duration * sr));
-  const off = new (window.OfflineAudioContext || window.webkitOfflineAudioContext)(1, len, sr);
-  const src = off.createBufferSource(); src.buffer = dec; src.connect(off.destination); src.start(0);
-  const d = (await off.startRendering()).getChannelData(0);
-  const ab = new ArrayBuffer(44 + d.length * 2), v = new DataView(ab);
-  const w = (o, s) => { for (let i = 0; i < s.length; i++) v.setUint8(o + i, s.charCodeAt(i)); };
-  w(0, 'RIFF'); v.setUint32(4, 36 + d.length * 2, true); w(8, 'WAVE'); w(12, 'fmt ');
-  v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true); v.setUint32(24, sr, true);
-  v.setUint32(28, sr * 2, true); v.setUint16(32, 2, true); v.setUint16(34, 16, true); w(36, 'data'); v.setUint32(40, d.length * 2, true);
-  for (let i = 0; i < d.length; i++) { const x = Math.max(-1, Math.min(1, d[i])); v.setInt16(44 + i * 2, x < 0 ? x * 0x8000 : x * 0x7fff, true); }
-  return await aBase64(new Blob([ab], { type: 'audio/wav' }));
-}
-async function decodificar(ac, blob) {
-  const buf = await blob.arrayBuffer();
-  return await new Promise((ok, ko) => { const p = ac.decodeAudioData(buf, ok, ko); if (p && p.then) p.then(ok, ko); });
-}
-function aBase64(blob) { return new Promise((ok, ko) => { const r = new FileReader(); r.onload = () => ok(String(r.result).split(',')[1]); r.onerror = ko; r.readAsDataURL(blob); }); }
 
 async function enviarPartida() {
-  if (grabador && grabador.state === 'recording') { aviso('Para primero la grabación'); return; }
+  pararDictado();
   const texto = $('fTexto').value.trim();
-  if (!S.audio && !texto) { aviso('Graba un audio o escribe qué hay que hacer'); return; }
+  if (!texto) { aviso('Dicta o escribe qué hay que hacer'); return; }
   // 1º se guarda en el móvil; 2º se intenta enviar. Si no hay cobertura, queda en cola.
-  const envio = { cid: uid(), presupuestoId: S.pres.id, foto: S.foto, audio: S.audio, texto, fecha: Date.now(), error: '', intentos: 0 };
+  const envio = { cid: uid(), presupuestoId: S.pres.id, foto: S.foto, texto, fecha: Date.now(), error: '', intentos: 0 };
   let enCola = true;
   try { await cola.put(envio); } catch (e) { enCola = false; }
   cargando(navigator.onLine === false ? 'Guardando…' : 'Interpretando… (unos segundos)');
@@ -514,7 +528,14 @@ function editar(id) {
   S.editando = l;
   $('lCap').value = l.capitulo; $('lDesc').value = l.descripcion; $('lUd').value = l.unidad;
   $('lCant').value = fmt(l.cantidad).replace(/\./g, ''); $('lPrecio').value = l.precio === '' ? '' : String(l.precio).replace('.', ',');
-  $('lOrden').value = l.orden; $('lNotas').value = l.notas || ''; $('lTrans').textContent = l.transcripcion || '—';
+  $('lOrden').value = l.orden; $('lNotas').value = l.notas || ''; $('lTrans').value = l.transcripcion || '';
+  $('bReint').disabled = false; $('lReintInfo').textContent = '';
+  cola.fotoGet(l.id).then(g => {
+    if (S.editando !== l) return;
+    S.editandoLocal = g || null;
+    if (g && g.texto && !$('lTrans').value) $('lTrans').value = g.texto;
+    $('lReintInfo').textContent = l.fotoId && !(g && g.foto) ? 'La foto de esta partida no está guardada en este móvil: se volverá a interpretar solo con el texto y se mantendrá la foto actual.' : '';
+  }).catch(() => { S.editandoLocal = null; });
   $('ePrev').classList.toggle('oculto', !l.fotoId); if (l.fotoId) $('ePrev').src = mini(l.fotoId, 1000);
   $('lAudio').classList.toggle('oculto', !l.audioId); $('lAudio').href = 'https://drive.google.com/file/d/' + l.audioId + '/view';
   calcImporte(); ver('vEditar');
@@ -526,10 +547,12 @@ async function guardarPartida() {
   const l = S.editando;
   const datos = { id: l.id, capitulo: $('lCap').value.trim() || 'General', descripcion: $('lDesc').value, unidad: $('lUd').value,
     cantidad: numero($('lCant').value), precio: $('lPrecio').value.trim() === '' ? '' : numero($('lPrecio').value),
-    orden: numero($('lOrden').value), notas: $('lNotas').value, estado: 'OK' };
+    orden: numero($('lOrden').value), notas: $('lNotas').value, estado: 'OK', transcripcion: $('lTrans').value.trim() };
   cargando('Guardando…');
   try {
     const n = await api('guardarPartida', { partida: datos });
+    if (!n.transcripcion && datos.transcripcion) n.transcripcion = datos.transcripcion;
+    const g = S.editandoLocal; cola.fotoPut({ id: n.id, foto: g && g.foto || null, texto: datos.transcripcion }).catch(() => {});
     S.partidas = S.partidas.map(x => x.id === n.id ? n : x).sort((a, b) => numero(a.orden) - numero(b.orden));
     S.pila.pop(); pintarPresupuesto(); ver('vPres', true);
   } catch (e) { aviso(e.message); }
@@ -540,10 +563,38 @@ async function borrarPartida() {
   if (!confirm('¿Borrar esta partida?')) return;
   cargando('Borrando…');
   try {
-    await api('borrarPartida', { id: S.editando.id });
+    await api('borrarPartida', { id: S.editando.id }); cola.fotoDel(S.editando.id).catch(() => {});
     S.partidas = S.partidas.filter(x => x.id !== S.editando.id);
     S.pila.pop(); pintarPresupuesto(); ver('vPres', true);
   } catch (e) { aviso(e.message); }
+  finally { cargando(); }
+}
+
+/* Vuelve a interpretar la partida con el texto (corregido) y su foto; sustituye a la anterior */
+async function reinterpretar() {
+  const l = S.editando, texto = $('lTrans').value.trim();
+  if (!texto) { aviso('Escribe o dicta primero el texto'); return; }
+  if (navigator.onLine === false) { aviso('Hace falta cobertura para volver a interpretar.'); return; }
+  if (!confirm('¿Volver a interpretar? Esta partida se sustituirá por lo que salga de la nueva interpretación.')) return;
+  const g = S.editandoLocal, foto = g && g.foto || null;
+  cargando('Interpretando… (unos segundos)');
+  try {
+    const nuevas = await api('nuevaPartida', { presupuestoId: S.pres.id, foto, fotoId: foto ? '' : (l.fotoId || ''), texto, cid: uid() });
+    // Mantiene la posición y el capítulo de la partida original; si no viaja la foto, conserva la de Drive
+    for (const n of nuevas) {
+      const upd = { id: n.id, capitulo: n.capitulo || l.capitulo || 'General', descripcion: n.descripcion, unidad: n.unidad, cantidad: n.cantidad, precio: n.precio,
+        orden: l.orden, notas: n.notas || '', estado: n.estado || 'Revisar', transcripcion: texto };
+      if (!foto && l.fotoId && !n.fotoId) upd.fotoId = l.fotoId;
+      try { const m = await api('guardarPartida', { partida: upd }); Object.assign(n, m); } catch (e) { n.orden = l.orden; }
+      if (!n.fotoId && upd.fotoId) n.fotoId = upd.fotoId;
+      n.transcripcion = n.transcripcion || texto;
+      await cola.fotoPut({ id: n.id, foto, texto }).catch(() => {});
+    }
+    await api('borrarPartida', { id: l.id }); cola.fotoDel(l.id).catch(() => {});
+    S.partidas = S.partidas.filter(x => x.id !== l.id).concat(nuevas).sort((a, b) => numero(a.orden) - numero(b.orden));
+    S.pila.pop(); pintarPresupuesto(); ver('vPres', true);
+    aviso(nuevas.length === 1 ? 'Partida reinterpretada. Revísala.' : nuevas.length + ' partidas nuevas en su lugar. Revísalas.');
+  } catch (e) { aviso(e.red ? 'Sin conexión. Inténtalo con cobertura.' : 'Error: ' + e.message); }
   finally { cargando(); }
 }
 
